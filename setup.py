@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="FilePacker",
-    version="0.1.0",
+    version="0.2.0",
     description="A small and simple API for packing an arbitrary directory tree into a 'filepack'.",
     author="Ali Athar",
     author_email="athar@vision.rwth-aachen.de",

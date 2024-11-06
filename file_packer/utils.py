@@ -1,8 +1,10 @@
 from PIL import Image
+
 from file_packer import FilePackReader
 
 try:
     import cv2
+
     CV2_IMPORTED = True
 except ImportError as err:
     CV2_IMPORTED = False
@@ -55,7 +57,9 @@ def isfile(path, file_reader=None, *args, **kwargs):
 
 def cv2_imread(path, file_reader, *args, **kwargs):
     if not CV2_IMPORTED:
-        raise EnvironmentError("This method in not usable since cv2 could not be imported.")
+        raise EnvironmentError(
+            "This method in not usable since cv2 could not be imported."
+        )
     if isinstance(file_reader, FilePackReader):
         return file_reader.cv2_imread(path, *args, **kwargs)
     else:

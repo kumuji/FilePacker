@@ -1,4 +1,5 @@
 from io import BytesIO, StringIO
+
 from tqdm import tqdm
 
 try:
@@ -6,16 +7,19 @@ try:
 except ImportError as _:
     from multiprocessing import Lock
 
-from file_packer import FilePackHeader
-
 import os
+
+from file_packer import FilePackHeader
 
 try:
     import cv2
     import numpy as np
+
     CV2_AVAILABLE = True
 except ImportError as _:
-    print("[ WARN] 'imread_cv2' function will be unavailable because either OpenCV or NumPy could not be imported")
+    print(
+        "[ WARN] 'imread_cv2' function will be unavailable because either OpenCV or NumPy could not be imported"
+    )
     CV2_AVAILABLE = False
 
 
@@ -33,15 +37,27 @@ class DummyLock:
 try:
     _LOCK = Lock()
 except PermissionError as _:
-    print("[ WARN] Could not create Lock object. FilePack access from concurrent processes might be problematic.")
+    print(
+        "[ WARN] Could not create Lock object. FilePack access from concurrent processes might be problematic."
+    )
 
     _LOCK = DummyLock()
 
 
 class FilePackReader(object):
-    def __init__(self, file, base_path='', verbose=False, multiprocess_lock=True):
+    def __init__(
+        self,
+        file,
+        base_path="",
+        verbose=False,
+        multiprocess_lock=True,
+        load_into_memory=False,
+    ):
         if isinstance(file, str):
-            self.__ifile = open(file, 'rb', buffering=0)
+            self.__ifile = open(file, "rb", buffering=0)
+        elif isinstance(file, bytes):
+            # Wrap bytes into a BytesIO object to simulate a file object
+            self.__ifile = BytesIO(file)
         else:
             self.__ifile = file
 
@@ -49,6 +65,14 @@ class FilePackReader(object):
         self.base_path = header.base_path
         if base_path:  # overwrite base path if one is provided
             self.base_path = base_path
+
+        # Read the entire file into memory if specified
+        self.__file_in_memory = None
+        if load_into_memory:
+            if verbose:
+                print("Loading file into memory")
+            self.__ifile.seek(0)
+            self.__file_in_memory = self.__ifile.read()
 
         # build a dictionary of the file paths (including directory structure) to their corresponding offsets in the
         # packed file
@@ -62,15 +86,19 @@ class FilePackReader(object):
             if len(path_tokens) > 1:
                 if path_tokens[0] not in subdict:
                     subdict[path_tokens[0]] = dict()
-                populate_file_map_recursive(subdict[path_tokens[0]], path_tokens[1:], offset, byte_size)
+                populate_file_map_recursive(
+                    subdict[path_tokens[0]], path_tokens[1:], offset, byte_size
+                )
             else:
                 subdict[path_tokens[0]] = (offset, byte_size)
             return
 
         self.__total_files = header.num_files
         for i in tqdm(range(header.num_files), disable=not verbose):
-            path_tokens = [t for t in header.filenames[i].split('/') if t]
-            populate_file_map_recursive(self.__file_map, path_tokens, offset, header.buffer_sizes[i])
+            path_tokens = [t for t in header.filenames[i].split("/") if t]
+            populate_file_map_recursive(
+                self.__file_map, path_tokens, offset, header.buffer_sizes[i]
+            )
             offset += header.buffer_sizes[i]
 
         if not multiprocess_lock:
@@ -84,19 +112,23 @@ class FilePackReader(object):
         return self.__total_files
 
     def __strip_base_path(self, path):
-        if path[:len(self.base_path)] != self.base_path:
-            raise IOError("The provided path '{}' does not have the expected base path as the file pack: '{}'".format(
-                path, self.base_path
-            ))
-        return path[len(self.base_path):].lstrip('/')
+        if path[: len(self.base_path)] != self.base_path:
+            raise IOError(
+                "The provided path '{}' does not have the expected base path as the file pack: '{}'".format(
+                    path, self.base_path
+                )
+            )
+        return path[len(self.base_path) :].lstrip("/")
 
     def __get_path_element(self, path):
-        path_tokens = [t for t in path.split('/') if t]
+        path_tokens = [t for t in path.split("/") if t]
         path_map = self.__file_map
         for t in path_tokens:
             path_map = path_map.get(t)
             if not path_map:
-                raise IOError("No file/directory named '{}' found in file pack".format(path))
+                raise IOError(
+                    "No file/directory named '{}' found in file pack".format(path)
+                )
         return path_map
 
     def __get_file_info(self, filepath):
@@ -113,8 +145,13 @@ class FilePackReader(object):
 
         global _LOCK
         with _LOCK:
-            self.__ifile.seek(offset)
-            file_buffer = self.__ifile.read(num_bytes)
+            if self.__file_in_memory:
+                # Read from memory if loaded
+                file_buffer = self.__file_in_memory[offset : offset + num_bytes]
+            else:
+                # Fallback to reading from disk
+                self.__ifile.seek(offset)
+                file_buffer = self.__ifile.read(num_bytes)
         return file_buffer
 
     def open(self, filepath, mode, exclude_base_path=False):
@@ -164,7 +201,7 @@ class FilePackReader(object):
         # path_tokens = [t for t in dirpath.split('/') if t]
 
     def walk(self, exclude_base_path=False, sort_entries=False):
-        base_dirpath = '' if exclude_base_path else self.base_path
+        base_dirpath = "" if exclude_base_path else self.base_path
 
         def walk_recursive(dirpath, subdict):
             dirnames = []
@@ -182,16 +219,20 @@ class FilePackReader(object):
 
             yield dirpath, dirnames, filenames
             for dirname in dirnames:
-                yield from walk_recursive(os.path.join(dirpath, dirname), subdict[dirname])
+                yield from walk_recursive(
+                    os.path.join(dirpath, dirname), subdict[dirname]
+                )
 
         return walk_recursive(base_dirpath, self.__file_map)
 
-    def print_directory_structure(self, ignore_base_path=False, directories_only=False, indentation=3):
+    def print_directory_structure(
+        self, ignore_base_path=False, directories_only=False, indentation=3
+    ):
         def print_recursive(subdict, indent):
             for k, v in subdict.items():
                 indent_str = " " * indent
                 if isinstance(v, dict):
-                    print("{}- {}: {}".format(indent_str, k, '({})'.format(len(v))))
+                    print("{}- {}: {}".format(indent_str, k, "({})".format(len(v))))
                     print_recursive(v, indent + indentation)
                 elif isinstance(v, (tuple, list)):
                     if not directories_only:
